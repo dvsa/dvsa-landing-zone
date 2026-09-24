@@ -189,6 +189,21 @@ export async function getLandingZoneDetails(
             break;
         }
       }
+
+      // DVSA fork patch: Control Tower 4.0's GetLandingZone manifest response omits the
+      // `organizationStructure` key entirely, so the case above never runs and
+      // securityOuName is left undefined. Downstream, aws-organization/index.ts's
+      // prepareOuList() excludes the Security OU from CT registration with
+      // `item.name !== landingZoneDetails.securityOuName` - against undefined, that
+      // matches nothing, the Security OU stays in the registration list, and Control
+      // Tower rejects the attempt ("AWSControlTowerBaseline cannot be enabled on the
+      // Security OU"). Restore the exclusion using DVSA's own config-declared Security
+      // OU name (organization-config.yaml: organizationalUnits[].name: Security).
+      // Fixed upstream at v1.15.1 ("control-tower: modify exclusion logic for CT
+      // Security OU", #1008) - drop this block once the fork is on v1.15.1 or later.
+      if (!landingZoneDetails.securityOuName) {
+        landingZoneDetails.securityOuName = 'Security';
+      }
       landingZoneDetails.landingZoneIdentifier = response.landingZone.arn!;
       landingZoneDetails.status = response.landingZone.status!;
       landingZoneDetails.version = response.landingZone.version!;
