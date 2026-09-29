@@ -29,6 +29,9 @@ function buildProps(cdkOptions: Record<string, unknown> = {}): AcceleratorStackP
     globalConfig: {
       cdkOptions,
     },
+    prefixes: {
+      accelerator: 'AWSAccelerator',
+    },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any as AcceleratorStackProps;
 }
@@ -48,6 +51,19 @@ describe('getStackSynthesizer', () => {
     expect(props.cloudFormationExecutionRole).toBeUndefined();
     expect(props.deployRoleArn).toBeUndefined();
     expect(props.fileAssetPublishingRoleArn).toBeUndefined();
+  });
+
+  it('falls back to the accelerator prefix Deployment-Role in the management account when nothing else is configured', () => {
+    // The Installer's bootstrap-management.sh always applies the custom template to the management
+    // account, unconditionally, so that role exists there even with no cdkOptions flag set.
+    const synthesizer = getStackSynthesizer(buildProps(), managementAccountId, region);
+
+    expect(synthesizer).toBeInstanceOf(cdk.DefaultStackSynthesizer);
+    const props = synthesizerProps(synthesizer);
+    expect(props.deployRoleArn).toBe(`arn:aws:iam::${managementAccountId}:role/AWSAccelerator-Deployment-Role`);
+    expect(props.cloudFormationExecutionRole).toBe(
+      `arn:aws:iam::${managementAccountId}:role/AWSAccelerator-Deployment-Role`,
+    );
   });
 
   it('uses CliCredentialsStackSynthesizer when useManagementAccessRole is set', () => {

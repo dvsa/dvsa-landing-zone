@@ -86,6 +86,14 @@ export function getStackSynthesizer(
     });
   }
 
+  if (!deploymentRoleName && accountId === managementAccountId) {
+    // The Installer's own bootstrap-management.sh always applies the custom bootstrap template to
+    // the management account specifically, unconditionally, regardless of any cdkOptions flag, so
+    // `${prefix}-Deployment-Role` always exists there even when every other account is left on CDK's
+    // plain default bootstrap template.
+    deploymentRoleName = `${props.prefixes.accelerator}-Deployment-Role`;
+  }
+
   if (!deploymentRoleName) {
     // No cdkOptions flag or override resolved a role name, so nothing guarantees a named deployment
     // role exists in this account (regression introduced in 6636b6664 / v1.14.0): fall back to CDK's
