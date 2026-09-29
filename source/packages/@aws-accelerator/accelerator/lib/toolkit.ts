@@ -294,9 +294,9 @@ export class AcceleratorToolkit {
     // template entirely rather than reconciling those roles away. forceBootstrap remains
     // the supported way to force a genuine re-bootstrap. Drop this once bootstrapping is
     // made consistent/idempotent across all call sites upstream.
-    if (!usingCustomTemplate && !(options.cdkOptions?.forceBootstrap ?? false) && options.region) {
+    if (!usingCustomTemplate && !(options.cdkOptions?.forceBootstrap ?? false) && options.region && options.accountId) {
       const toolkitStackName = `${options.stackPrefix}-CDKToolkit`;
-      if (await AcceleratorToolkit.cdkToolkitStackExists(toolkitStackName, options.region)) {
+      if (await AcceleratorToolkit.cdkToolkitStackExists(toolkitStackName, options)) {
         logger.info(
           `CDK Toolkit stack ${toolkitStackName} already exists in ${options.region}, skipping default-template bootstrap to avoid deleting any custom bootstrap resources already in place.`,
         );
@@ -336,16 +336,29 @@ export class AcceleratorToolkit {
 
   /**
    * DVSA fork patch: checks whether the CDK Toolkit bootstrap stack already exists in a
-   * stable, non-failed state. Used by {@link bootstrapToolKitStacks} to avoid reconciling
-   * away custom bootstrap resources (ManagementDeploymentRole/CustomDeploymentRole) with
-   * CDK's default bootstrap template. Any lookup failure (including "stack does not
-   * exist") is treated as "does not exist", so normal bootstrap behaviour is unaffected
-   * when the stack is genuinely absent or this check itself can't be completed.
+   * stable, non-failed state, in the same target account/region bootstrapToolKitStacks()
+   * is about to bootstrap. Used to avoid reconciling away custom bootstrap resources
+   * (ManagementDeploymentRole/CustomDeploymentRole) with CDK's default bootstrap
+   * template. Uses the same account-scoped credential provider as the Toolkit instance
+   * itself (sdkProvider), not ambient/default credentials, since this function runs
+   * against every target account the pipeline deploys to (management and member
+   * accounts alike), not just the account the CodeBuild role natively runs as. Any
+   * lookup failure (including "stack does not exist") is treated as "does not exist",
+   * so normal bootstrap behaviour is unaffected when the stack is genuinely absent or
+   * this check itself can't be completed.
    */
-  private static async cdkToolkitStackExists(stackName: string, region: string): Promise<boolean> {
+  private static async cdkToolkitStackExists(stackName: string, options: AcceleratorToolkitProps): Promise<boolean> {
     const stableStatuses = ['CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE'];
     try {
-      const cfnClient = new CloudFormationClient({ region });
+      const credentials = await sdkProvider(
+        options.managementAccountId,
+        options.accountId!,
+        options.partition,
+        options.region!,
+        options.assumeRoleName,
+        options.stage,
+      );
+      const cfnClient = new CloudFormationClient({ region: options.region, credentials });
       const response = await throttlingBackOff(() =>
         cfnClient.send(new DescribeStacksCommand({ StackName: stackName })),
       );
