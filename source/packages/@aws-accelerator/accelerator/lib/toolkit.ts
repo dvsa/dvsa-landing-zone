@@ -418,7 +418,9 @@ export class AcceleratorToolkit {
       managementAccountId: options.managementAccountId,
       stage: options.stage!,
     });
-    const roleArn = `arn:${options.partition}:iam::${options.accountId!}:role/${deploymentRoleName}`;
+    const roleArn = deploymentRoleName
+      ? `arn:${options.partition}:iam::${options.accountId!}:role/${deploymentRoleName}`
+      : undefined;
     const deployPromises: Promise<DeployResult>[] = [];
     for (const stack of stackName) {
       deployPromises.push(AcceleratorToolkit.runDeployStackCli(options, stack, cli, roleArn));
@@ -433,19 +435,21 @@ export class AcceleratorToolkit {
     accountId: string;
     managementAccountId: string;
     stage: string;
-  }) {
+  }): string | undefined {
     const managementAcceleratorStages = [
       AcceleratorStage.ACCOUNTS,
       AcceleratorStage.PREPARE,
       AcceleratorStage.DIAGNOSTICS_PACK,
       AcceleratorStage.PIPELINE,
     ];
-    const deploymentRole = props.customDeploymentRoleName ?? `${props.stackPrefix}-Deployment-Role`;
-    const managementDeploymentRole = `${props.stackPrefix}-Management-Deployment-Role`;
     if (managementAcceleratorStages.includes(props.stage as AcceleratorStage)) {
-      return managementDeploymentRole;
+      return `${props.stackPrefix}-Management-Deployment-Role`;
     }
-    return deploymentRole;
+    // No customDeploymentRoleName configured: nothing guarantees a named deployment role exists in
+    // this account (same regression class as getStackSynthesizer, introduced in 34de3ab4ee /
+    // v1.14.0), so leave roleArn undefined and let the deploy call use the credentials the Toolkit
+    // session already assumed for this account instead of forcing `${prefix}-Deployment-Role`.
+    return props.customDeploymentRoleName;
   }
 
   /**
