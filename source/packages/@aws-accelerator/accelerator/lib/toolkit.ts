@@ -16,6 +16,8 @@ import * as path from 'path';
 import * as https from 'https';
 import { App } from 'aws-cdk-lib';
 
+import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-cloudformation';
+
 import { cdkOptionsConfig, GlobalConfig } from '@aws-accelerator/config';
 import { createCdkApp } from './app-lib';
 import {
@@ -25,6 +27,7 @@ import {
   checkDiffFiles,
   printStackDiff,
 } from '@aws-accelerator/utils';
+import { throttlingBackOff } from '@aws-accelerator/utils/lib/throttle';
 
 import { AcceleratorStackNames } from './accelerator';
 import { AcceleratorStage } from './accelerator-stage';
@@ -256,6 +259,7 @@ export class AcceleratorToolkit {
    */
   private static async bootstrapToolKitStacks(cli: Toolkit, options: AcceleratorToolkitProps) {
     let source = BootstrapSource.default();
+    let usingCustomTemplate = false;
 
     const environments = BootstrapEnvironments.fromList([`aws://${options.accountId}/${options.region}`]);
     const trustedAccounts: string[] = [];
@@ -276,6 +280,28 @@ export class AcceleratorToolkit {
       }`;
       const templatePath = `./cdk.out/${bootstrapStackName}/${bootstrapStackName}.template.json`;
       source = BootstrapSource.customTemplate(templatePath);
+      usingCustomTemplate = true;
+    }
+
+    // DVSA fork patch: this function is called from multiple stages/scripts (e.g. the
+    // Prepare stage's bootstrap_management_before_prepare.sh, and the dedicated Bootstrap
+    // pipeline stage), and none of the cdkOptions above are set here, so it always falls
+    // through to CDK's default bootstrap template. That template has no knowledge of
+    // ManagementDeploymentRole/CustomDeploymentRole created by a prior custom-template
+    // bootstrap (via BootstrapStack or the Installer's bootstrap-management.yaml), and
+    // deletes them on every call, regardless of which stage triggered it. If the toolkit
+    // stack already exists in a stable state, skip re-bootstrapping with the default
+    // template entirely rather than reconciling those roles away. forceBootstrap remains
+    // the supported way to force a genuine re-bootstrap. Drop this once bootstrapping is
+    // made consistent/idempotent across all call sites upstream.
+    if (!usingCustomTemplate && !(options.cdkOptions?.forceBootstrap ?? false) && options.region) {
+      const toolkitStackName = `${options.stackPrefix}-CDKToolkit`;
+      if (await AcceleratorToolkit.cdkToolkitStackExists(toolkitStackName, options.region)) {
+        logger.info(
+          `CDK Toolkit stack ${toolkitStackName} already exists in ${options.region}, skipping default-template bootstrap to avoid deleting any custom bootstrap resources already in place.`,
+        );
+        return;
+      }
     }
 
     const bootstrapStackParameters: BootstrapStackParameters = {
@@ -305,6 +331,28 @@ export class AcceleratorToolkit {
       }
       logger.error(`Bootstrap failed with error :${e}. Options are: ${JSON.stringify(options)}`);
       throw new Error(`Bootstrap for account ${options.accountId} in region ${options.region} failed.`);
+    }
+  }
+
+  /**
+   * DVSA fork patch: checks whether the CDK Toolkit bootstrap stack already exists in a
+   * stable, non-failed state. Used by {@link bootstrapToolKitStacks} to avoid reconciling
+   * away custom bootstrap resources (ManagementDeploymentRole/CustomDeploymentRole) with
+   * CDK's default bootstrap template. Any lookup failure (including "stack does not
+   * exist") is treated as "does not exist", so normal bootstrap behaviour is unaffected
+   * when the stack is genuinely absent or this check itself can't be completed.
+   */
+  private static async cdkToolkitStackExists(stackName: string, region: string): Promise<boolean> {
+    const stableStatuses = ['CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE'];
+    try {
+      const cfnClient = new CloudFormationClient({ region });
+      const response = await throttlingBackOff(() =>
+        cfnClient.send(new DescribeStacksCommand({ StackName: stackName })),
+      );
+      const status = response.Stacks?.[0]?.StackStatus;
+      return !!status && stableStatuses.includes(status);
+    } catch (e) {
+      return false;
     }
   }
 
