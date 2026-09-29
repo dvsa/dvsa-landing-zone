@@ -30,6 +30,19 @@ PARTITION=${PARTITION:-$(aws sts get-caller-identity --query 'Arn' --output text
 # Bootstrap CDK in home and global region
 # Synth generates CloudFormation templates, bootstrap deploys CDK toolkit resources
 for REGION in $REGIONS; do
+  # DVSA fork patch: skip re-bootstrapping if the CDKToolkit stack already exists in this
+  # region. Without this check, the bootstrap call below unconditionally re-applies CDK's
+  # default bootstrap template on every single Prepare run. That template has no knowledge
+  # of the custom ManagementDeploymentRole/CustomDeploymentRole resources created by
+  # BootstrapStack (or by the Installer's bootstrap-management.yaml), and deletes them,
+  # immediately before the Prepare deploy step that depends on ManagementDeploymentRole
+  # still existing. Mirrors the existence check already used in the Installer's own
+  # bootstrap-management.sh. Drop this once this script is made idempotent upstream.
+  if aws cloudformation describe-stacks --stack-name "${ACCELERATOR_PREFIX}-CDKToolkit" --region "$REGION" >/dev/null 2>&1; then
+    echo "CDK Toolkit already bootstrapped in region: $REGION for account: $ACCOUNT_ID, skipping"
+    continue
+  fi
+
   echo "Bootstrapping CDK in region: $REGION for account: $ACCOUNT_ID"
   # Generate CloudFormation templates for bootstrap stage
   yarn run ts-node --transpile-only cdk.ts synth --config-dir $CODEBUILD_SRC_DIR_Config --partition $PARTITION --stage bootstrap --account $ACCOUNT_ID --region $REGION
