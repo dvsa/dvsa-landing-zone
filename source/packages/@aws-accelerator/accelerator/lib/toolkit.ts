@@ -283,10 +283,10 @@ export class AcceleratorToolkit {
       usingCustomTemplate = true;
     }
 
-    // DVSA fork patch: this function is called from multiple stages/scripts (e.g. the
-    // Prepare stage's bootstrap_management_before_prepare.sh, and the dedicated Bootstrap
-    // pipeline stage), and none of the cdkOptions above are set here, so it always falls
-    // through to CDK's default bootstrap template. That template has no knowledge of
+    // This function is called from multiple stages/scripts (e.g. the Prepare stage's
+    // bootstrap_management_before_prepare.sh, and the dedicated Bootstrap pipeline stage),
+    // and when none of the cdkOptions above are set, it always falls through to CDK's
+    // default bootstrap template. That template has no knowledge of
     // ManagementDeploymentRole/CustomDeploymentRole created by a prior custom-template
     // bootstrap (via BootstrapStack or the Installer's bootstrap-management.yaml), and
     // deletes them on every call, regardless of which stage triggered it. If the toolkit
@@ -335,7 +335,7 @@ export class AcceleratorToolkit {
   }
 
   /**
-   * DVSA fork patch: checks whether the CDK Toolkit bootstrap stack already exists in a
+   * Checks whether the CDK Toolkit bootstrap stack already exists in a
    * stable, non-failed state, in the same target account/region bootstrapToolKitStacks()
    * is about to bootstrap. Used to avoid reconciling away custom bootstrap resources
    * (ManagementDeploymentRole/CustomDeploymentRole) with CDK's default bootstrap
